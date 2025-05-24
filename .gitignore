@@ -1,0 +1,10 @@
+# Sensitive files
+credentials.json
+token.json
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Log files
+app.log
