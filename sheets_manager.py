@@ -23,9 +23,9 @@ def get_sheets_service():
         try:
             creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
             logger.info("Loaded credentials from token.json")
-        except Exception as e:
-            logger.error(f"Error loading token.json: {e}. Will attempt to re-authenticate.")
-            creds = None
+        except Exception as e: # This is the block in question
+            logger.error(f"Error loading token.json: {e}. Will attempt to re-authenticate.") # INDENTED
+            creds = None # INDENTED
 
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
@@ -43,28 +43,24 @@ def get_sheets_service():
                 return None
             try:
                 flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, SCOPES)
-                # Pass a specific port to run_local_server to avoid issues if default port is in use
-                # You can choose any available port, e.g., 8080, 8081 etc.
-                # If you often run multiple local servers, consider making the port configurable or trying a few.
-                creds = flow.run_local_server(port=0) # port=0 will find an available port
+                creds = flow.run_local_server(port=0) 
                 logger.info("Authentication successful, obtained new credentials.")
-            except FileNotFoundError: # This specific exception is good to catch for credentials.json
+            except FileNotFoundError: 
                 logger.error(f"{CREDENTIALS_FILE} not found during authentication flow. Ensure it's in the project root.")
                 return None
             except Exception as e:
                 logger.error(f"Error during authentication flow: {e}", exc_info=True)
                 return None
         # Save the credentials for the next run
-        if creds: # Ensure creds exist before trying to save
+        if creds: 
             try:
                 with open(TOKEN_FILE, 'w') as token:
                     token.write(creds.to_json())
                 logger.info(f"Saved new credentials to {TOKEN_FILE}")
             except Exception as e:
                 logger.error(f"Error saving credentials to {TOKEN_FILE}: {e}", exc_info=True)
-                # Even if saving token fails, proceed with current creds for this session
         
-    if not creds: # Final check if creds are still None
+    if not creds: 
         logger.error("Failed to obtain valid credentials after all authentication attempts.")
         return None
 
@@ -74,7 +70,6 @@ def get_sheets_service():
         return service
     except HttpError as err:
         logger.error(f"An API error occurred while building the service: {err}", exc_info=True)
-        # Log details from the error object if available
         if hasattr(err, '_get_reason'):
              logger.error(f"Reason: {err._get_reason()}")
         return None
@@ -127,6 +122,26 @@ def write_data_to_sheet(service, spreadsheet_id, sheet_name, data_df):
     :param data_df: Pandas DataFrame containing the data.
     :return: True if successful, False otherwise.
     """
+    # New debug logs
+    logger.debug("SHEETS_MANAGER: Entered write_data_to_sheet function.")
+    logger.debug(f"SHEETS_MANAGER: Received service type: {type(service)}")
+    logger.debug(f"SHEETS_MANAGER: Received service value: {str(service)[:200]}...") # Log snippet
+    logger.debug(f"SHEETS_MANAGER: Received spreadsheet_id type: {type(spreadsheet_id)}, value: {spreadsheet_id}")
+    logger.debug(f"SHEETS_MANAGER: Received sheet_name type: {type(sheet_name)}, value: {sheet_name}")
+    logger.debug(f"SHEETS_MANAGER: Received data_df type: {type(data_df)}")
+
+    if data_df is not None:
+        # Create a string buffer to capture DataFrame.info() output
+        import io
+        buffer = io.StringIO()
+        data_df.info(buf=buffer)
+        df_info_str = buffer.getvalue()
+        logger.debug(f"SHEETS_MANAGER: DataFrame info:\n{df_info_str}")
+        logger.debug(f"SHEETS_MANAGER: DataFrame head:\n{data_df.head().to_string()}")
+    else:
+        logger.debug("SHEETS_MANAGER: data_df is None.")
+
+    # Existing validation checks follow
     if not service:
         logger.error("Google Sheets service object is not available. Cannot write data.")
         return False
@@ -191,10 +206,11 @@ def write_data_to_sheet(service, spreadsheet_id, sheet_name, data_df):
         result = service.spreadsheets().values().update(
             spreadsheetId=spreadsheet_id,
             range=f"'{sheet_name}'!A1", # Start writing from cell A1
-            valueInputOption='USER_ENTERED', # Or 'RAW' if you don't need type conversion
+            valueInputOption='USER_ENTERED', 
             body=body
         ).execute()
-        logger.info(f"{result.get('updatedCells')} cells updated in '{sheet_name}'. Data written successfully.")
+        cells_updated_count = result.get('updatedCells', 0)
+        logger.info(f"{cells_updated_count} cells updated in '{sheet_name}'. Data written successfully.")
         return True
 
     except HttpError as error:
