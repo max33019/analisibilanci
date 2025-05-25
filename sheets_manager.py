@@ -125,7 +125,7 @@ def write_data_to_sheet(service, spreadsheet_id, sheet_name, data_df):
     # New debug logs
     logger.debug("SHEETS_MANAGER: Entered write_data_to_sheet function.")
     logger.debug(f"SHEETS_MANAGER: Received service type: {type(service)}")
-    logger.debug(f"SHEETS_MANAGER: Received service value: {str(service)[:200]}...") # Log snippet
+    # logger.debug(f"SHEETS_MANAGER: Received service value: {str(service)[:200]}...") # Commented out
     logger.debug(f"SHEETS_MANAGER: Received spreadsheet_id type: {type(spreadsheet_id)}, value: {spreadsheet_id}")
     logger.debug(f"SHEETS_MANAGER: Received sheet_name type: {type(sheet_name)}, value: {sheet_name}")
     logger.debug(f"SHEETS_MANAGER: Received data_df type: {type(data_df)}")
@@ -136,8 +136,8 @@ def write_data_to_sheet(service, spreadsheet_id, sheet_name, data_df):
         buffer = io.StringIO()
         data_df.info(buf=buffer)
         df_info_str = buffer.getvalue()
-        logger.debug(f"SHEETS_MANAGER: DataFrame info:\n{df_info_str}")
-        logger.debug(f"SHEETS_MANAGER: DataFrame head:\n{data_df.head().to_string()}")
+        # logger.debug(f"SHEETS_MANAGER: DataFrame info:\n{df_info_str}") # Commented out
+        # logger.debug(f"SHEETS_MANAGER: DataFrame head:\n{data_df.head().to_string()}") # Commented out
     else:
         logger.debug("SHEETS_MANAGER: data_df is None.")
 

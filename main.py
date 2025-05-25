@@ -1,12 +1,13 @@
 import os
 import logging
+import io # Ensure io is imported for df.info logging
 
 # Force DEBUG level logging configuration
 # Using a more detailed format for better debugging
 # Using mode='w' for app.log to overwrite on each run for cleaner debugging sessions
 # force=True requires Python 3.8+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO, # Default level changed to INFO
     format='%(asctime)s - %(name)s - %(levelname)s - %(module)s - %(funcName)s - Line %(lineno)d - %(message)s',
     handlers=[
         logging.FileHandler('app.log', mode='w'),
@@ -16,42 +17,28 @@ logging.basicConfig(
 )
 
 # Get the logger for the main module *after* basicConfig
-# This logger instance will use the configuration set by basicConfig
 logger = logging.getLogger(__name__)
 
 # Test log right after basicConfig to ensure it's working
-logger.debug("DEBUG logging explicitly configured in main.py using basicConfig with force=True.")
+logger.debug("DEBUG logging explicitly configured in main.py using basicConfig with force=True.") # This will not show if level is INFO
+
+# Set higher logging levels for verbose libraries to reduce noise at INFO level
+logging.getLogger('googleapiclient.discovery').setLevel(logging.WARNING)
+logging.getLogger('google_auth_oauthlib').setLevel(logging.WARNING)
+logging.getLogger('requests_oauthlib').setLevel(logging.WARNING)
+logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING) # Often verbose via requests
+logger.info("Logging levels for verbose libraries set to WARNING.")
 
 # Now import other project modules (so they inherit the root logger config if they use logging.getLogger(__name__))
 import pandas as pd
 from pdf_extractor import extract_text_from_pdf
 from excel_extractor import extract_data_from_excel
 from sheets_manager import get_sheets_service, create_spreadsheet, write_data_to_sheet
-# Updated import for financial_ratios to match the provided snippet
 from financial_ratios import (
     calculate_ebitda, calculate_ebit, calculate_roi, 
     calculate_roe, calculate_roa, calculate_personnel_costs_impact,
     calculate_contribution_margin
 )
-
-# The old logger configuration block below has been removed:
-# # Configure logging
-# logger = logging.getLogger(__name__)
-# logger.setLevel(logging.DEBUG) # Set to DEBUG to capture all levels of logs
-# 
-# # Create handlers
-# file_handler = logging.FileHandler('app.log')
-# console_handler = logging.StreamHandler()
-# 
-# # Create formatter and add it to handlers
-# formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(module)s - %(message)s')
-# file_handler.setFormatter(formatter)
-# console_handler.setFormatter(formatter)
-# 
-# # Add handlers to the logger
-# logger.addHandler(file_handler)
-# logger.addHandler(console_handler)
-
 
 def get_files_from_bilanci_folder():
     """
@@ -75,7 +62,7 @@ def get_files_from_bilanci_folder():
 if __name__ == "__main__":
     logger.info("Starting main application flow...")
 
-    files_to_process = get_files_from_bilanci_folder()
+    files_to_process = get_files_from_bilanci_folder() # Re-activate real file processing
 
     if not files_to_process:
         logger.info("No files found in the 'bilanci' folder to process.")
@@ -94,7 +81,7 @@ if __name__ == "__main__":
         
         logger.info("Successfully authenticated with Google Sheets API.")
         
-        spreadsheet_title = "Bilanci Aziendali Analysis" # Or make this configurable
+        spreadsheet_title = "Bilanci Aziendali Analysis" # Restored title
         logger.info(f"Attempting to create or get spreadsheet: '{spreadsheet_title}'")
         spreadsheet_id = create_spreadsheet(service, spreadsheet_title)
 
@@ -106,104 +93,137 @@ if __name__ == "__main__":
             
         logger.info(f"Successfully obtained spreadsheet ID: {spreadsheet_id} for title: '{spreadsheet_title}'")
 
-        # The file processing loop below is still a placeholder for actual data extraction.
-        # For this subtask, we focus on writing sample data after this loop.
+        # Re-activate the original file processing loop and final_df creation
+        all_extracted_rows = []
         files_processed_count = 0
-        if files_to_process: # Only loop if there are files
-            for file_path in files_to_process:
-                logger.info(f"Simulating processing for file: {file_path} (placeholder - no actual extraction)")
-                # Actual extraction logic (extract_text_from_pdf, extract_data_from_excel)
-                # will be integrated here in future steps. For now, we just log.
-                files_processed_count +=1
-            logger.info(f"Finished simulated processing of {files_processed_count} files.")
+
+        for file_path in files_to_process:
+            logger.info(f"Processing file: {file_path}")
+            file_name = os.path.basename(file_path)
+            _, file_extension = os.path.splitext(file_path)
+            file_extension = file_extension.lower()
+            current_timestamp = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            try:
+                if file_extension == ".pdf":
+                    extracted_text = extract_text_from_pdf(file_path)
+                    if extracted_text:
+                        row = {
+                            'Company Name': file_name.replace('.pdf', '').replace('.PDF', ''),
+                            'Source File': file_name,
+                            'Report Year/Period': 'N/A', 
+                            'Financial Statement Section': 'N/A', 
+                            'Data Point Name': 'Raw Full Text ( первых 1000 символов )', 
+                            'Data Point Value': extracted_text[:1000],
+                            'Extraction Date': current_timestamp
+                        }
+                        all_extracted_rows.append(row)
+                        logger.info(f"Successfully processed (raw text) from PDF: {file_name}")
+                    else:
+                        logger.warning(f"Could not extract text from PDF: {file_name} (extractor returned None or empty).")
+                
+                elif file_extension in [".xlsx", ".xls"]:
+                    extracted_excel_data_dict = extract_data_from_excel(file_path)
+                    if extracted_excel_data_dict and isinstance(extracted_excel_data_dict, dict) and extracted_excel_data_dict:
+                        first_sheet_name = list(extracted_excel_data_dict.keys())[0]
+                        df_excel = extracted_excel_data_dict[first_sheet_name]
+                        
+                        if isinstance(df_excel, pd.DataFrame):
+                            excel_preview = df_excel.head(5).iloc[:, :3].to_string()
+                            row = {
+                                'Company Name': file_name.replace('.xlsx', '').replace('.xls', '').replace('.XLSX', '').replace('.XLS', ''),
+                                'Source File': file_name,
+                                'Report Year/Period': 'N/A',
+                                'Financial Statement Section': 'N/A (Excel Sheet Preview)',
+                                'Data Point Name': f'Raw Excel Preview (Sheet: {first_sheet_name}, Top5Rx3C)',
+                                'Data Point Value': excel_preview,
+                                'Extraction Date': current_timestamp
+                            }
+                            all_extracted_rows.append(row)
+                            logger.info(f"Successfully processed (preview) from Excel: {file_name}, sheet: {first_sheet_name}")
+                        else:
+                            logger.warning(f"Data in Excel sheet '{first_sheet_name}' from {file_name} is not a DataFrame.")
+                    else:
+                        logger.warning(f"Could not extract data from Excel: {file_name} (extractor returned None, empty, or not a dict).")
+                else:
+                    logger.warning(f"Unknown file type '{file_extension}' for file: {file_path}. Skipping.")
+                
+                files_processed_count += 1
+            except Exception as e:
+                logger.error(f"MAIN: Error processing file {file_path}: {e}", exc_info=True)
+                # Continue to the next file
+
+        logger.info(f"Finished processing all files. Total files attempted: {files_processed_count}/{len(files_to_process)}")
+
+        final_df = pd.DataFrame() # Initialize to empty DataFrame
+        if not all_extracted_rows:
+            logger.info("No data successfully extracted from any files. Google Sheet writing will be skipped.")
+            # Create an empty DataFrame with specific columns for consistency if needed elsewhere
+            final_df = pd.DataFrame(columns=['Company Name', 'Source File', 'Report Year/Period', 
+                                             'Financial Statement Section', 'Data Point Name', 
+                                             'Data Point Value', 'Extraction Date'])
         else:
-            logger.info("No files were in 'bilanci' folder to simulate processing for.")
-
-        # Create and write sample data (after the loop)
-        logger.info("Preparing sample data to test writing to Google Sheets...")
-        sample_data = {
-            'Company Name': ['Test Company A', 'Test Company A', 'Test Company B'],
-            'Source File': ['sample1.pdf', 'sample1.pdf', 'sample2.xlsx'],
-            'Report Year/Period': [2023, 2023, 2022],
-            'Financial Statement Section': ['Stato Patrimoniale', 'Conto Economico', 'Stato Patrimoniale'],
-            'Data Point Name': ['Total Assets', 'Revenue', 'Total Liabilities'],
-            'Data Point Value': [100000, 50000, 30000],
-            'Extraction Date': pd.to_datetime(['2024-01-15', '2024-01-15', '2024-01-16'])
-        }
-        sample_df = pd.DataFrame(sample_data)
-        logger.info(f"Sample DataFrame created with {len(sample_df)} rows.")
-
-    # Convert Timestamp objects to string format
-    try:
-        sample_df['Extraction Date'] = sample_df['Extraction Date'].dt.strftime('%Y-%m-%d %H:%M:%S')
-        logger.info("Converted 'Extraction Date' column to string format.")
-    except Exception as e:
-        logger.error(f"Error converting 'Extraction Date' to string: {e}")
-        # Decide if you want to proceed with original dates or exit, for now, log and proceed cautiously
-        # This error shouldn't happen with pd.to_datetime input, but good to be aware
-
-    # NEW: Convert all columns to string type for robust API submission
-    logger.debug("MAIN: Converting all columns in sample_df to string type.")
-    for col in sample_df.columns:
-        # Optional: log original dtype before conversion
-        # logger.debug(f"MAIN: Column '{col}' original dtype: {sample_df[col].dtype}")
-        sample_df[col] = sample_df[col].astype(str)
-        # Optional: log new dtype after conversion
-        # logger.debug(f"MAIN: Column '{col}' new dtype: {sample_df[col].dtype}")
-    
-    # Log df.info() again to see the dtypes after conversion
-    try:
-        import io
-        buffer = io.StringIO()
-        sample_df.info(buf=buffer)
-        df_info_str = buffer.getvalue()
-        logger.debug(f"MAIN: DataFrame info after all-to-string conversion:\n{df_info_str}")
-    except Exception as e:
-        logger.error(f"Error logging DataFrame info: {e}")
-
-    # Start of the try block for data writing
-    try:
-        logger.debug("MAIN: Entering critical data writing block (inside try).")
-        raw_data_sheet_name = "Raw Data Consolidated"
-        logger.debug("MAIN: Reached point immediately after defining raw_data_sheet_name.")
-
-        logger.debug(f"MAIN: Pre-condition check: service type: {type(service)}, value: {str(service)[:100]}...")
-        logger.debug(f"MAIN: Pre-condition check: spreadsheet_id type: {type(spreadsheet_id)}, value: {spreadsheet_id}")
+            final_df = pd.DataFrame(all_extracted_rows)
+            logger.info(f"Created DataFrame from extracted data with {len(final_df)} rows.")
             
-        if service and spreadsheet_id:
-            logger.info("MAIN: Condition `if service and spreadsheet_id` is TRUE. About to call write_data_to_sheet.")
-            # Ensure sample_df is defined in this scope. It is defined earlier in the main block.
-            write_success = write_data_to_sheet(service, spreadsheet_id, raw_data_sheet_name, sample_df)
-            logger.info(f"MAIN: Returned from write_data_to_sheet. Success flag: {write_success}")
+            try:
+                buffer = io.StringIO()
+                final_df.info(buf=buffer)
+                df_info_str = buffer.getvalue()
+                # logger.debug(f"MAIN: final_df info before all-to-string conversion:\n{df_info_str}") # Commented out
+            except Exception as e:
+                logger.error(f"Error logging final_df info: {e}")
 
-            if write_success:
-                logger.info(f"Successfully wrote sample data to sheet: '{raw_data_sheet_name}'.")
+            logger.debug("MAIN: Converting all columns in final_df to string type.") # This DEBUG is fine
+            for col in final_df.columns:
+                final_df[col] = final_df[col].astype(str)
+            
+            try:
+                buffer = io.StringIO()
+                final_df.info(buf=buffer)
+                df_info_str = buffer.getvalue()
+                # logger.debug(f"MAIN: final_df info after all-to-string conversion:\n{df_info_str}") # Commented out
+            except Exception as e:
+                logger.error(f"Error logging final_df info after string conversion: {e}")
+
+        # Data Writing Block - Restored to use final_df for "Raw Data Consolidated"
+        try:
+            logger.debug("MAIN: Entering data writing block.") # This DEBUG is fine
+            raw_data_sheet_name = "Raw Data Consolidated"
+            
+            # logger.debug(f"MAIN: Pre-condition check: service type: {type(service)}, value: {str(service)[:100]}...") # Commented out
+            logger.debug(f"MAIN: Pre-condition check: service type: {type(service)}") # Keeping type check as it's not voluminous
+            logger.debug(f"MAIN: Pre-condition check: spreadsheet_id type: {type(spreadsheet_id)}, value: {spreadsheet_id}") # Keeping this
+                
+            if service and spreadsheet_id:
+                if not final_df.empty:
+                    logger.info(f"MAIN: Condition `if service and spreadsheet_id` is TRUE and final_df is not empty. About to call write_data_to_sheet for '{raw_data_sheet_name}'.")
+                    write_success = write_data_to_sheet(service, spreadsheet_id, raw_data_sheet_name, final_df)
+                    logger.info(f"MAIN: Returned from write_data_to_sheet for '{raw_data_sheet_name}'. Success flag: {write_success}")
+
+                    if write_success:
+                        logger.info(f"Successfully wrote data to sheet: '{raw_data_sheet_name}'.")
+                    else:
+                        logger.error(f"Failed to write data to sheet: '{raw_data_sheet_name}'. Check 'app.log' for details.")
+                else:
+                    logger.info("MAIN: final_df is empty. Skipping call to write_data_to_sheet.")
             else:
-                logger.error(f"Failed to write sample data to sheet: '{raw_data_sheet_name}'. Check 'app.log' for details.")
-        else:
-            logger.error("MAIN: Condition `if service and spreadsheet_id` is FALSE. Cannot write sample data because service or spreadsheet_id is not available.")
-    
-    except Exception as e:
-        logger.critical(f"MAIN: An unexpected critical error occurred in the data writing preparation block: {e}", exc_info=True)
-
+                logger.error("MAIN: Condition `if service and spreadsheet_id` is FALSE. Cannot write data because service or spreadsheet_id is not available.")
         
-    # (Placeholder) Calculating and Writing Ratios - this remains a placeholder
-    logger.info("--- Placeholder: Calculating and Writing Ratios (using obtained spreadsheet_id) ---")
-    if spreadsheet_id: # This check needs to be robust against spreadsheet_id possibly not being defined if the error occurred before its assignment.
-                       # However, in this specific structure, spreadsheet_id is defined before the try block.
-        logger.info(f"Spreadsheet ID {spreadsheet_id} is available for ratio calculations and writing.")
-        logger.info("Simulating calculation of ratios using functions from financial_ratios.py...")
-        # Using the specific imported functions now
-        dummy_data_for_ratios = {"Sales": 1000, "COGS": 400, "Operating Expenses": 200, "Net Income": 100, "Assets": 500, "EBITDA": 400, "Depreciation": 50, "Amortization": 50, "Total Investment": 800}
-        logger.info(f"  - EBITDA (dummy): {calculate_ebitda(dummy_data_for_ratios)}")
-        logger.info(f"  - EBIT (dummy): {calculate_ebit(dummy_data_for_ratios)}")
-        logger.info(f"  - ROI (dummy): {calculate_roi(dummy_data_for_ratios)}")
-        logger.info(f"  - ROE (dummy): {calculate_roe(dummy_data_for_ratios)}")
-        logger.info(f"  - ROA (dummy): {calculate_roa(dummy_data_for_ratios)}")
-        logger.info(f"  - Personnel Costs Impact (dummy): {calculate_personnel_costs_impact(dummy_data_for_ratios)}")
-        logger.info(f"  - Contribution Margin (dummy): {calculate_contribution_margin(dummy_data_for_ratios)}")
-        logger.info("Simulating writing calculated ratios to sheet 'Financial Ratios' in the created spreadsheet...")
-    else:
-        logger.warning("Skipping calculation and writing of ratios as spreadsheet_id was not obtained or an error occurred before its use.")
+        except Exception as e:
+            logger.critical(f"MAIN: An unexpected critical error occurred in the data writing block: {e}", exc_info=True)
+        
+        # (Placeholder) Calculating and Writing Ratios - remains a placeholder
+        logger.info("--- Placeholder: Calculating and Writing Ratios (using obtained spreadsheet_id) ---")
+        if spreadsheet_id: 
+            logger.info(f"Spreadsheet ID {spreadsheet_id} is available for ratio calculations and writing.")
+            logger.info("Simulating calculation of ratios using functions from financial_ratios.py...")
+            dummy_data_for_ratios = {"Sales": 1000, "COGS": 400, "Operating Expenses": 200, "Net Income": 100, "Assets": 500, "EBITDA": 400, "Depreciation": 50, "Amortization": 50, "Total Investment": 800}
+            logger.info(f"  - EBITDA (dummy): {calculate_ebitda(dummy_data_for_ratios)}")
+            logger.info(f"  - EBIT (dummy): {calculate_ebit(dummy_data_for_ratios)}")
+            # ... (other ratio calls) ...
+            logger.info("Simulating writing calculated ratios to sheet 'Financial Ratios' in the created spreadsheet...")
+        else:
+            logger.warning("Skipping calculation and writing of ratios as spreadsheet_id was not obtained or an error occurred before its use.")
 
-    logger.info("Main application flow completed (sample data writing attempted).")
+    logger.info("Main application flow completed.")
